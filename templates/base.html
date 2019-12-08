@@ -1,0 +1,4 @@
+{% extends "Ergo/templates/base.html" %}
+{% block footer %}
+{{ macros::social_list(classes="foot_list", bsize="extra_small", extra=config.extra, siteurl=config.base_url, rss=config.generate_rss) }}
+{% endblock footer %}

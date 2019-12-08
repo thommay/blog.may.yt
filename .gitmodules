@@ -1,0 +1,3 @@
+[submodule "themes/Ergo"]
+	path = themes/Ergo
+	url = https://github.com/InsidiousMind/Ergo
