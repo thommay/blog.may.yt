@@ -151,3 +151,119 @@ That's Mongo fully configured for our use.
 
 ## The Unifi Controller
 
+Let's minimally get the Controller running. We want to tell it to use
+our freshly baked MongoDB instance, but that's it. Replace XXX in the
+URLs with the password you set for the `unifi` user.
+
+```yaml
+mongodb:
+  enabled: true
+  dbUri: mongodb://unifi:XXX@unifi-mongodb/unifi?authSource=unifi
+  statDbUri: mongodb://unifi:XXX@unifi-mongodb/unifi_stat?authSource=unifi
+  databaseName: unifi
+```
+
+As a quick aside, we must specify `authSource`, because user accounts in
+MongoDB are tied to a database, but can then be granted access to other
+databases. No, me neither.  
+
+As usual, we'll helm install this:
+```console
+helm install unifi stable/unifi -f unifi.yaml
+```
+
+and after a moment or two, we'll have a running unifi pod. We'll also
+have some services:
+
+```console
+> kubectl get svc -l app.kubernetes.io/name=unifi
+```
+
+You'll notice that the TYPE field is a mix of
+[NodePort](https://kubernetes.io/docs/concepts/services-networking/service/#nodeport) and ClusterIP (the default). A ClusterIP sets up an IP in the cluster's `serviceSubnet`, meaning it won't be routable outside the cluster. A NodePort exposes the configured port on each node of the cluster, and then forwards that port to a ClusterIP.
+
+To access the web UI, we'll need to port forward 8443 to the pod running our controller:
+```console
+kubectl --namespace default port-forward --address 0.0.0.0 unifi-795dc84449-dd66q  8443:8443
+```
+
+This works, but is pretty annoying; we'll need to have the
+port-forward command running all the time. In cloud environments,
+Kubernetes works with the cloud's native load balancers to expose
+services. At home, we need to do something slightly different.
+
+### MetalLB
+[MetalLB](https://metallb.universe.tf/) provides Kubernetes LoadBalancers on bare metal clusters. For the moment, we'll do the simplest possible thing, and use it in [L2 mode](https://metallb.universe.tf/concepts/layer2/).
+First, we'll get it installed:
+```console
+> kubectl apply -f https://raw.githubusercontent.com/google/metallb/v0.8.3/manifests/metallb.yaml
+```
+
+Then, we'll configure L2 mode:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: metallb-system
+  name: config
+data:
+  config: |
+    address-pools:
+    - name: default
+      protocol: layer2
+      addresses:
+      - 192.168.1.210-192.168.1.250
+```
+We're provisioning a pool of 40 IPs here to use for load balancers.
+Now, apply that:
+
+```console
+> kubectl apply -f metallb.yaml
+```
+
+Now, we can update our unifi config to use a LoadBalancer. We
+want to run all the services on the same IP, just to make life
+easier.
+
+By default Kubernetes doesn't allow you to put TCP ports
+and UDP ports on the same LoadBalancer (apparently because GCP
+doesn't support it), but MetalLB does support it, so we'll set
+an annotation to allow it.
+
+Append this to your existing `unifi.yaml`:
+
+```yaml
+guiService: &lbService
+  type: LoadBalancer
+  annotations:
+    metallb.universe.tf/allow-shared-ip: k8s-ext57
+    loadBalancerIP: 192.168.1.231
+controllerService: *lbService
+stunService: *lbService
+discoveryService: *lbService
+```
+You'll note we're using YAML anchors to save duplicating the
+config.[^unifiedFN]
+
+Now, we'll install the new config:
+```console
+> helm upgrade unifi stable/unifi -f unifi.yaml
+```
+
+Using `upgrade` rather than `install` means that the configs get
+updated, rather than creating new ones. If all's gone to plan, you
+should now see `LoadBalancer`s as the service types:
+```console
+> kubectl get svc -l app.kubernetes.io/name=unifi
+NAME               TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)           AGE
+unifi-controller   LoadBalancer   10.96.34.54     192.168.1.231   8080:31917/TCP    4d20h
+```
+
+And you'll be able to access your controller at
+[https://192.168.1.231:8443](https://192.168.1.231:8443)!
+
+Thanks for sticking with me, I know this got quite long. But hopefully
+the end result was worth it.
+
+[^unifiedFN]: In theory, the `unifiedService` should do this for us, but
+  I can't get it to work.
