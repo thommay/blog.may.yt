@@ -196,7 +196,7 @@ services. At home, we need to do something slightly different.
 [MetalLB](https://metallb.universe.tf/) provides Kubernetes LoadBalancers on bare metal clusters. For the moment, we'll do the simplest possible thing, and use it in [L2 mode](https://metallb.universe.tf/concepts/layer2/).
 First, we'll get it installed:
 ```console
-> kubectl apply -f https://raw.githubusercontent.com/google/metallb/v0.8.3/manifests/metallb.yaml
+helm install --name metallb stable/metallb
 ```
 
 Then, we'll configure L2 mode:
