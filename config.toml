@@ -8,7 +8,9 @@ compile_sass = true
 
 # Whether to do syntax highlighting
 # Theme can be customised by setting the `highlight_theme` variable to a theme supported by Zola
+# https://www.getzola.org/documentation/getting-started/configuration/#syntax-highlighting
 highlight_code = true
+highlight_theme = "ayu-dark"
 
 # Whether to build a search index to be used later on by a JavaScript library
 build_search_index = false
@@ -16,11 +18,11 @@ build_search_index = false
 generate_feed = true
 generate_rss = true
 
-theme = "Ergo"
 [extra]
 # Put all your custom variables here
 profile="thom.png"
 github="thommay"
 twitter="thommay"
 instagram="thommay"
+author = { name = "Thom May"}
 email="thom@may.yt"

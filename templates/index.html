@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}{{config.title}}{% endblock title %}
+{% block main %}
+{% set posts_section = get_section(path = "_index.md") %}
+{% set posts = posts_section.pages %}
+
+<div class="posts">
+  {%- for post in posts -%}
+  <article class="post">
+    <h2 class="post-title"><a href="/{{ post.path | safe }}">{{ post.title }}</a></h2>
+    <time datetime="{{ post.date }}" class="post-date">{{ post.date | date }}</time>
+    <div class="post-summary">
+      {{ post.summary | safe }}
+      <a class="read-more" href="{{ post.permalink }}#continue-reading"><em>continue&nbsp;reading&nbsp;→</em></a>
+    </div>
+  </article>
+  {%- endfor -%}
+</div>
+
+{% endblock main %}
