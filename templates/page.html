@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% import "macros.html" as macros %}
+
+{% block title %}{{ page.title }} | {{ config.title }}{% endblock title%}
+{% block header %}<aside id="all-posts-link"><a href="{{ config.base_url | safe }}" title="All Posts">« All Posts</a></aside>{% endblock header %}
+
+{% block description -%}
+{{ page.summary | safe | striptags | truncate(length=150) }}
+{%- endblock description %}
+
+{% block toc_aside %}
+<aside id="toc-aside">
+    <h2>Table of Contents</h2>
+    <ol>
+        {% for h2 in page.toc %}<li>
+            <a href="#{{h2.id | safe}}">{{ h2.title | safe }}</a>
+            {% if h2.children %}<ol>
+                {% for h3 in h2.children %}<li>
+                    <a href="#{{h3.id | safe}}">{{ h3.title | safe }}</a>
+                </li>{% endfor %}
+            </ol>{% endif %}
+        </li>{% endfor %}
+        <li class="toc-comments-link"><a href="#comments">Comments</a></li>
+    </ol>
+</aside>
+{% endblock toc_aside %}
+
+{% block main %}
+    <h1>{{ page.title }}</h1>
+    <time datetime="{{ page.date | date(format="%Y-%m-%d") }}" class="post-date">
+        {{ page.date | date(format="%b %d, %Y") }}
+        {% if page.extra.updated %} (updated on {{ page.extra.updated | date(format="%b %d, %Y") }}) {% endif %}
+    </time>
+
+    {{ page.content | replace(from="<!-- toc -->", to=macros::toc(toc=page.toc))  | safe }}
+
+    <hr>
+    <div class="PageNavigation">
+      {% if page.earlier %}
+      <a class="prev" href="/{{ page.earlier.path | safe }}">&laquo; {{ page.earlier.title }}</a>
+      {% endif %}
+      {% if page.later %}
+      <a class="next" href="/{{ page.later.path | safe }}">{{ page.later.title }} &raquo;</a>
+      {% endif %}
+    </div>
+{% endblock main %}

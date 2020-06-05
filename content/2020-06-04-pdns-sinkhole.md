@@ -8,6 +8,7 @@ For some time I've been meaning to set up a
 [Pi-hole](https://github.com/pi-hole/pi-hole) to drop advertising and
 malware sites by using DNS. 
 <!-- more -->
+
 One of the things that has stopped me has
 been the size of the tech stack that Pi-hole uses - I don't really want
 to pick up a webserver, control panel and dnsmasq just to do some fancy
