@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang=en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Over the past few years, I&#x27;ve built up a small collection of
+Ubiquiti Unifi kit. With some small
+exceptions - mostly getting BT&#x27;s multicast HD content…">
+    <meta name="author" content="Thom May">
+
+    
+        <link rel="canonical" href="https://blog.may.yt/2019/12/unifi-controller-in-k8s/" />
+    
+
+    <link rel="alternate" type="application/atom+xml" title="Atom feed for blog.may.yt" href="https://blog.may.yt/atom.xml" />
+
+    <link href="/styles.css" rel="stylesheet">
+
+    <title>Running the Unifi Controller in Kubernetes | Thom&#x27;s Blog</title>
+</head>
+<body>
+  <div class="container content">
+    <header class="masthead">
+      <div style="position:relative">
+        <h2 class="masthead-title">
+          <a href="https://blog.may.yt" title="Home">Thom's Blog</a>
+        </h2>
+        <aside id="all-posts-link"><a href="https://blog.may.yt" title="All Posts">« All Posts</a></aside>
+      </div>
+    </header>
+
+    <div>
+      
+<aside id="toc-aside">
+    <h2>Table of Contents</h2>
+    <ol>
+        <li>
+            <a href="#the-unifi-controller">The Unifi Controller</a>
+            
+        </li><li>
+            <a href="#the-plan">The Plan</a>
+            <ol>
+                <li>
+                    <a href="#the-starting-point">The starting point</a>
+                </li>
+            </ol>
+        </li><li>
+            <a href="#persistent-data">Persistent Data</a>
+            
+        </li><li>
+            <a href="#mongodb">MongoDB</a>
+            
+        </li><li>
+            <a href="#the-unifi-controller-1">The Unifi Controller</a>
+            <ol>
+                <li>
+                    <a href="#metallb">MetalLB</a>
+                </li>
+            </ol>
+        </li>
+    </ol>
+</aside>
+
+      <main>
+    <h1>Running the Unifi Controller in Kubernetes</h1>
+    <time datetime="2019-12-08" class="post-date">
+        Dec 08, 2019
+        
+    </time>
+
+    <p>Over the past few years, I've built up a small collection of
+<a href="https://unifi-network.ui.com/">Ubiquiti Unifi</a> kit. With some small
+exceptions - mostly getting BT's multicast HD content working -
+pulling this all together has been a smooth process. But one part has
+always left me rather dissatisfied: running the management Controller. </p>
+<span id="continue-reading"></span><h3 id="the-unifi-controller">The Unifi Controller</h3>
+<p>There are fundamentally two ways to run the Controller. You can buy a
+Cloud Key and treat it as a managed device, or you can install the
+software (there are <a href="https://www.ui.com/download/unifi">Debian packages
+available</a>, amongst others) and run
+it yourself. Since I have a home server, I've always run this myself by
+creating a virtual machine for it and installing the package.</p>
+<p>The Controller itself is a Java app with an embedded MongoDB server for
+data retention. One of the reasons for my dissatisfaction has been this
+embedded MongoDB - it seemed like every upgrade of the package would
+cause the database to get wedged in new and exciting ways, requiring
+restore from backup or frantic searching to figure out the commands to
+recover the database.</p>
+<h2 id="the-plan">The Plan</h2>
+<p>I already had a minimally running <a href="https://kubernetes.io">Kubernetes</a>
+cluster at home, so the plan is to get from there to having the Unifi
+Controller connected to a separate MongoDB instance, all the required
+ports routable, and all my Unifi kit reporting in correctly.</p>
+<h3 id="the-starting-point">The starting point</h3>
+<p>A two node Kubernetes cluster, built with <a href="https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm/">Kubeadm</a> and running 1.16.1 currently.  Container networking provided by <a href="https://www.weave.works/docs/net/latest/kubernetes/">Weave Net</a>, and completely default. The <a href="https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/#control-plane-node-isolation">control-plane node is untainted</a>, so it can run workloads. </p>
+<p>To minimise the amount of raw YAML I needed to write, I chose to
+use <a href="https://helm.sh">Helm 3</a> to manage individual workloads. Once you
+have <a href="https://helm.sh/docs/intro/install/">Helm installed</a>, add the
+stable repository, which is where we'll find the charts we need:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt;  helm repo add stable https://kubernetes-charts.storage.googleapis.com/
+</span></code></pre><h2 id="persistent-data">Persistent Data</h2>
+<p>Both MongoDB and the Unifi Controller expect to persist data to disk,
+and we'll want that data to last for longer than the lifetime of an
+individual pod - so we don't lose all our data when we upgrade the
+Controller.<br />
+Kubernetes uses <a href="https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims">PersistentVolumeClaims</a> (PVCs) to associate storage with a service. A claim is bound to a PersistentVolume, and a pod then mounts the volume. Storage is defined by StorageClasses, and by default there are none available. </p>
+<p>The
+<a href="https://github.com/kubernetes-incubator/external-storage">external-storage</a> 
+project provides some implementations of StorageClasses for common
+file servers. I already have an NFS server running, so I'll use the
+<a href="https://github.com/kubernetes-incubator/external-storage/tree/master/nfs-client">nfs-client</a> StorageClass. There's a Helm chart, so we simply need to provide the details of our NFS server:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; helm install  nfs-pvc stable/nfs-client-provisioner --set nfs.server=192.168.1.91 --set nfs.path=/data/pvc
+</span></code></pre>
+<p>You'll also want to have <code>libnfs-utils</code> installed on each node of your
+cluster.</p>
+<p>Once done, you should see a new StorageClass:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; kubectl get storageclass
+NAME         PROVISIONER                                    AGE
+nfs-client   cluster.local/nfs-pvc-nfs-client-provisioner   4d13h
+</span></code></pre>
+<p>We'll want to set that StorageClass as the <a href="https://kubernetes.io/docs/tasks/administer-cluster/change-default-storage-class/">default</a>, so we don't have to
+specify it explicitly each time.</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; kubectl patch storageclass nfs-client -p &#39;{&quot;metadata&quot;: {&quot;annotations&quot;:{&quot;storageclass.kubernetes.io/is-default-class&quot;:&quot;true&quot;}}}&#39;
+</span></code></pre><h2 id="mongodb">MongoDB</h2>
+<p>Now we have some storage available, let's get MongoDB running. Helm makes it easy to inspect the
+README associated with a chart, so let's start by doing so: </p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; helm show readme stable/mongodb
+</span></code></pre>
+<p>We'll want to create a database for the Controller, and a username and
+password. I also chose to turn on Prometheus metrics, leaving me with a
+<code>unifi-mongodb.yaml</code> like this:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#59c2ff;">mongodbUsername</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">unifi
+mongodbPassword</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">xxxxx
+mongodbDatabase</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">unifi
+metrics</span><span style="color:#bfbab0cc;">:
+  </span><span style="color:#59c2ff;">enabled</span><span style="color:#bfbab0cc;">: </span><span style="color:#f29718;">true
+</span></code></pre>
+<p>We'll install this chart with Helm:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; helm install unifi-mongodb stable/mongodb -f unifi-mongodb.yaml
+</span></code></pre>
+<p>We can see that a service, called <code>unifi-mongodb</code>, and a pod have been
+created:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; kubectl get svc,po -l app=mongodb
+NAME                    TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)     AGE
+service/unifi-mongodb   ClusterIP   10.96.155.160   &lt;none&gt;        27017/TCP   4d14h
+
+NAME                                 READY   STATUS    RESTARTS   AGE
+pod/unifi-mongodb-5bcbcdbdfc-whccb   1/1     Running   0          4d14h
+</span></code></pre>
+<p>Once the pod is Running, we'll want to use the MongoDB client to connect to
+the database, so we can perform some additional config. The instructions
+to do so are printed by Helm at the end of install, but I'll recap them
+here. First, get the MongoDB root password; it's stored as a
+<a href="https://kubernetes.io/docs/concepts/configuration/secret/">Secret</a>:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; export MONGODB_ROOT_PASSWORD=$(kubectl get secret --namespace default unifi-mongodb -o jsonpath=&quot;{.data.mongodb-root-password}&quot; | base64 --decode)
+</span></code></pre>
+<p>Now you can run a <code>mongodb-client</code> container and connect to the DB.
+Kubernetes automatically creates a host name for each service in the
+cluster, so we can use <code>unifi-mongodb</code> to connect:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; kubectl run --namespace default mongodb-client --rm --tty -i --restart=&#39;Never&#39; --image bitnami/mongodb --command -- mongo admin --host unifi-mongodb   --authenticationDatabase admin -u root -p $MONGODB_ROOT_PASSWORD
+</span></code></pre>
+<p>We need to grant additional privileges to the <code>unifi</code> user, to match
+what the Controller expects. We're going to grant <code>dbOwner</code> on <code>unifi</code>
+and <code>unifi_stat</code>, meaning that the Controller can drop the database and
+recreate it, which it needs to do when restoring from backup. We also
+grant <code>clusterMonitor</code> on the <code>admin</code> database, allowing the Controller
+to run the <code>serverStatus()</code> command.</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;"># first, make sure we&#39;re using the unifi database
+&gt; use unifi
+# next, grant the correct permissions
+&gt; db.grantRolesToUser(&quot;unifi&quot;, [ 
+  { db: &quot;unifi&quot;, role: &quot;dbOwner&quot; },
+  { db: &quot;unifi_stat&quot;, role: &quot;dbOwner&quot; },
+  { db: &quot;admin&quot;, role: &quot;clusterMonitor&quot; }
+  ]);
+# now verify
+&gt; &gt; db.getUser(&quot;unifi&quot;);
+</span></code></pre>
+<p>That's Mongo fully configured for our use.</p>
+<h2 id="the-unifi-controller-1">The Unifi Controller</h2>
+<p>Let's minimally get the Controller running. We want to tell it to use
+our freshly baked MongoDB instance, but that's it. Replace XXX in the
+URLs with the password you set for the <code>unifi</code> user.</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#59c2ff;">mongodb</span><span style="color:#bfbab0cc;">:
+  </span><span style="color:#59c2ff;">enabled</span><span style="color:#bfbab0cc;">: </span><span style="color:#f29718;">true
+  </span><span style="color:#59c2ff;">dbUri</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">mongodb://unifi:XXX@unifi-mongodb/unifi?authSource=unifi
+  statDbUri</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">mongodb://unifi:XXX@unifi-mongodb/unifi_stat?authSource=unifi
+  databaseName</span><span style="color:#bfbab0cc;">: </span><span style="color:#c2d94c;">unifi
+</span></code></pre>
+<p>As a quick aside, we must specify <code>authSource</code>, because user accounts in
+MongoDB are tied to a database, but can then be granted access to other
+databases. No, me neither.</p>
+<p>As usual, we'll helm install this:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">helm install unifi stable/unifi -f unifi.yaml
+</span></code></pre>
+<p>and after a moment or two, we'll have a running unifi pod. We'll also
+have some services:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; kubectl get svc -l app.kubernetes.io/name=unifi
+</span></code></pre>
+<p>You'll notice that the TYPE field is a mix of
+<a href="https://kubernetes.io/docs/concepts/services-networking/service/#nodeport">NodePort</a> and ClusterIP (the default). A ClusterIP sets up an IP in the cluster's <code>serviceSubnet</code>, meaning it won't be routable outside the cluster. A NodePort exposes the configured port on each node of the cluster, and then forwards that port to a ClusterIP.</p>
+<p>To access the web UI, we'll need to port forward 8443 to the pod running our controller:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">kubectl --namespace default port-forward --address 0.0.0.0 unifi-795dc84449-dd66q  8443:8443
+</span></code></pre>
+<p>This works, but is pretty annoying; we'll need to have the
+port-forward command running all the time. In cloud environments,
+Kubernetes works with the cloud's native load balancers to expose
+services. At home, we need to do something slightly different.</p>
+<h3 id="metallb">MetalLB</h3>
+<p><a href="https://metallb.universe.tf/">MetalLB</a> provides Kubernetes LoadBalancers on bare metal clusters. For the moment, we'll do the simplest possible thing, and use it in <a href="https://metallb.universe.tf/concepts/layer2/">L2 mode</a>.
+First, we'll get it installed:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">helm install metallb stable/metallb
+</span></code></pre>
+<p>Then, we'll configure L2 mode:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#59c2ff;">apiVersion</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">v1
+kind</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">ConfigMap
+metadata</span><span style="color:#bfbab0cc;">:
+  </span><span style="color:#59c2ff;">namespace</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">metallb-system
+  name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">config
+data</span><span style="color:#bfbab0cc;">:
+  </span><span style="color:#59c2ff;">config</span><span style="color:#bfbab0cc;">: </span><span style="color:#ff7733;">|
+</span><span style="color:#c2d94c;">    address-pools:
+    - name: default
+      protocol: layer2
+      addresses:
+      - 192.168.1.210-192.168.1.250
+</span></code></pre>
+<p>We're provisioning a pool of 40 IPs here to use for load balancers.
+Now, apply that:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; kubectl apply -f metallb.yaml
+</span></code></pre>
+<p>Now, we can update our unifi config to use a LoadBalancer. We
+want to run all the services on the same IP, just to make life
+easier.</p>
+<p>By default Kubernetes doesn't allow you to put TCP ports
+and UDP ports on the same LoadBalancer (apparently because GCP
+doesn't support it), but MetalLB does support it, so we'll set
+an annotation to allow it.</p>
+<p>Append this to your existing <code>unifi.yaml</code>:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#59c2ff;">guiService</span><span style="color:#bfbab0cc;">: </span><span style="color:#ff7733;">&amp;</span><span style="color:#59c2ff;">lbService
+  type</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">LoadBalancer
+  annotations</span><span style="color:#bfbab0cc;">:
+    </span><span style="color:#59c2ff;">metallb.universe.tf/allow-shared-ip</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">k8s-ext57
+    loadBalancerIP</span><span style="color:#bfbab0cc;">: </span><span style="color:#f29718;">192</span><span style="color:#bfbab0cc;">.</span><span style="color:#f29718;">168.1.231
+</span><span style="color:#59c2ff;">controllerService</span><span style="color:#bfbab0cc;">: </span><span style="color:#ff7733;">*</span><span style="color:#bfbab0;">lbService
+</span><span style="color:#59c2ff;">stunService</span><span style="color:#bfbab0cc;">: </span><span style="color:#ff7733;">*</span><span style="color:#bfbab0;">lbService
+</span><span style="color:#59c2ff;">discoveryService</span><span style="color:#bfbab0cc;">: </span><span style="color:#ff7733;">*</span><span style="color:#bfbab0;">lbService
+</span></code></pre>
+<p>You'll note we're using YAML anchors to save duplicating the
+config.<sup class="footnote-reference"><a href="#unifiedFN">1</a></sup></p>
+<p>Now, we'll install the new config:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; helm upgrade unifi stable/unifi -f unifi.yaml
+</span></code></pre>
+<p>Using <code>upgrade</code> rather than <code>install</code> means that the configs get
+updated, rather than creating new ones. If all's gone to plan, you
+should now see <code>LoadBalancer</code>s as the service types:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; kubectl get svc -l app.kubernetes.io/name=unifi
+NAME               TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)           AGE
+unifi-controller   LoadBalancer   10.96.34.54     192.168.1.231   8080:31917/TCP    4d20h
+</span></code></pre>
+<p>And you'll be able to access your controller at
+<a href="https://192.168.1.231:8443">https://192.168.1.231:8443</a>!</p>
+<p>Thanks for sticking with me, I know this got quite long. But hopefully
+the end result was worth it.</p>
+<div class="footnote-definition" id="unifiedFN"><sup class="footnote-definition-label">1</sup>
+<p>In theory, the <code>unifiedService</code> should do this for us, but
+I can't get it to work.</p>
+</div>
+
+
+    <hr>
+    <div class="PageNavigation">
+      
+      
+    </div>
+</main>
+    </div>
+
+    <footer class="footer">
+      <hr>
+      <small>
+        &copy; <time datetime="2020">2020</time>. All rights reserved.
+        <a href="https://blog.may.yt/contact/">Contact</a>
+      </small>
+    </footer>
+  </div>
+
+
+  <!-- Fathom - simple website analytics - https://github.com/usefathom/fathom -->
+  <script>
+    (function(f, a, t, h, o, m){
+      a[h]=a[h]||function(){
+        (a[h].q=a[h].q||[]).push(arguments)
+      };
+      o=f.createElement('script'),
+        m=f.getElementsByTagName('script')[0];
+      o.async=1; o.src=t; o.id='fathom-script';
+      m.parentNode.insertBefore(o,m)
+    })(document, window, '//stats.may.yt/tracker.js', 'fathom');
+    fathom('set', 'siteId', 'AVTMN');
+    fathom('trackPageview');
+  </script>
+  <!-- / Fathom -->
+</body>
+</html>

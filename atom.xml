@@ -1,0 +1,427 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+	<title>Thom&#x27;s Blog</title>
+	<subtitle>Thom&#x27;s Blog</subtitle>
+	<link href="https://blog.may.yt/atom.xml" rel="self" type="application/atom+xml"/>
+	<link href="https://blog.may.yt"/>
+	<generator uri="https://www.getzola.org/">Zola</generator>
+	<updated>2020-06-04T00:00:00+00:00</updated>
+	<id>https://blog.may.yt/atom.xml</id>
+	<entry xml:lang="en">
+		<title>Sinkholing with PowerDNS Recursor</title>
+		<published>2020-06-04T00:00:00+00:00</published>
+		<updated>2020-06-04T00:00:00+00:00</updated>
+		<link href="https://blog.may.yt/2020/06/pdns-sinkhole/" type="text/html"/>
+		<id>https://blog.may.yt/2020/06/pdns-sinkhole/</id>
+		<content type="html">&lt;p&gt;For some time I&#x27;ve been meaning to set up a
+&lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;pi-hole&#x2F;pi-hole&quot;&gt;Pi-hole&lt;&#x2F;a&gt; to drop advertising and
+malware sites by using DNS. &lt;&#x2F;p&gt;
+&lt;span id=&quot;continue-reading&quot;&gt;&lt;&#x2F;span&gt;
+&lt;p&gt;One of the things that has stopped me has
+been the size of the tech stack that Pi-hole uses - I don&#x27;t really want
+to pick up a webserver, control panel and dnsmasq just to do some fancy
+DNS recursion.&lt;&#x2F;p&gt;
+&lt;p&gt;I also have a Kubernetes cluster, so I&#x27;m gonna work my way through
+running &lt;a href=&quot;https:&#x2F;&#x2F;doc.powerdns.com&#x2F;recursor&#x2F;index.html&quot;&gt;PowerDNS
+Recursor&lt;&#x2F;a&gt; in a container
+in Kubernetes, and then setting it to sinkhole sites.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;running-powerdns-recursor&quot;&gt;Running PowerDNS Recursor&lt;&#x2F;h2&gt;
+&lt;p&gt;This is pretty straightforward. I&#x27;ve created a &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;thommay&#x2F;docker-pdns-recursor&quot;&gt;minimal
+Dockerfile&lt;&#x2F;a&gt; intended
+for use with Kubernetes, and put it &lt;a href=&quot;https:&#x2F;&#x2F;hub.docker.com&#x2F;r&#x2F;thommay&#x2F;pdns_recursor&quot;&gt;on
+DockerHub&lt;&#x2F;a&gt;. I used
+&lt;a href=&quot;https:&#x2F;&#x2F;buildah.io&#x2F;&quot;&gt;buildah&lt;&#x2F;a&gt; to build the image, since all my nodes
+have cri-o on rather than Docker.&lt;&#x2F;p&gt;
+&lt;p&gt;Next, I&#x27;ll run my &lt;code&gt;pdns_recursor&lt;&#x2F;code&gt; container in Kubernetes. We&#x27;ll use a
+&lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;concepts&#x2F;workloads&#x2F;controllers&#x2F;deployment&#x2F;&quot;&gt;Deployment&lt;&#x2F;a&gt; to ensure the container is running as a pod, and then a
+&lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;concepts&#x2F;services-networking&#x2F;service&quot;&gt;Service&lt;&#x2F;a&gt; with a &lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;concepts&#x2F;services-networking&#x2F;service&#x2F;#loadbalancer&quot;&gt;LoadBalancer&lt;&#x2F;a&gt; to expose port 53 on both UDP and TCP. The
+config for the recursor will live in a &lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;concepts&#x2F;configuration&#x2F;configmap&#x2F;&quot;&gt;ConfigMap&lt;&#x2F;a&gt; and get mounted into
+the pod as a &lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;tasks&#x2F;configure-pod-container&#x2F;configure-pod-configmap&#x2F;#add-configmap-data-to-a-volume&quot;&gt;Volume&lt;&#x2F;a&gt;.
+I&#x27;ve put all the kubernetes configs I&#x27;m using into &lt;a href=&quot;https:&#x2F;&#x2F;gist.github.com&#x2F;thommay&#x2F;80826aae8cc53187c46d7643f364172a&quot;&gt;a Gist&lt;&#x2F;a&gt;, and will
+only excerpt the interesting bits below.&lt;&#x2F;p&gt;
+&lt;p&gt;So, here&#x27;s the pod spec for the deployment:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;spec&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;volumes&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;recursor-config-volume
+        configMap&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;recursor-config
+      containers&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;image&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;docker.io&#x2F;thommay&#x2F;pdns_recursor:4.3.1-1
+        imagePullPolicy&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;IfNotPresent
+        name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;recursor
+        ports&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;containerPort&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;53
+            &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;protocol&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;UDP
+            name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;udp-dns
+          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;containerPort&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;53
+            &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;protocol&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;TCP
+            name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;tcp-dns
+          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;containerPort&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;8082
+            &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;metrics
+        volumeMounts&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;recursor-config-volume
+          mountPath&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&#x2F;srv&#x2F;config
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Into the &lt;code&gt;recursor-config&lt;&#x2F;code&gt; &lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;tasks&#x2F;configure-pod-container&#x2F;configure-pod-configmap&#x2F;#create-configmaps-from-files&quot;&gt;ConfigMap&lt;&#x2F;a&gt; goes a very trivial &lt;code&gt;recursor.conf&lt;&#x2F;code&gt;:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;local-address=0.0.0.0, ::
+disable-syslog=yes         # so that our logs show up in the pod&amp;#39;s logs
+webserver=yes              # for prometheus metrics scraping
+webserver-address=0.0.0.0 
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We&#x27;ll finish off with a pair of &lt;a href=&quot;https:&#x2F;&#x2F;gist.github.com&#x2F;thommay&#x2F;80826aae8cc53187c46d7643f364172a#file-recursor-svc-yaml&quot;&gt;LoadBalancer
+services&lt;&#x2F;a&gt;, for TCP and UDP.&lt;&#x2F;p&gt;
+&lt;p&gt;With these running, we can use &lt;code&gt;dig&lt;&#x2F;code&gt; to test our recursor:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; dig Adsatt.go.starwave.com @192.168.1.232 +short
+adimages.go.com.edgesuite.net.
+a1412.g.akamai.net.
+213.123.244.147
+213.123.244.138
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Great, we have a working DNS resolver.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;sinkholing&quot;&gt;Sinkholing&lt;&#x2F;h2&gt;
+&lt;p&gt;Lots of kind people maintain blocklists of unsavoury sites. A good list
+of them is maintained on &lt;a href=&quot;https:&#x2F;&#x2F;firebog.net&#x2F;&quot;&gt;the Firebog&lt;&#x2F;a&gt;, along with
+some basic validation. You&#x27;ll probably also want to pick up 
+&lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;anudeepND&#x2F;whitelist&quot;&gt;anudeep&#x27;s permitted list&lt;&#x2F;a&gt;.&lt;&#x2F;p&gt;
+&lt;p&gt;PowerDNS allows us to &lt;a href=&quot;https:&#x2F;&#x2F;doc.powerdns.com&#x2F;recursor&#x2F;lua-scripting&#x2F;index.html&quot;&gt;script the recursor&lt;&#x2F;a&gt; with Lua,
+and we&#x27;ll use this to import the block lists and check the queries
+against them.&lt;&#x2F;p&gt;
+&lt;p&gt;I wrote a very trivial Rust binary to do this for me: &lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;thommay&#x2F;blocklister&quot;&gt;here&#x27;s the
+source&lt;&#x2F;a&gt;. You give it a list of
+blocklists, a permit list and you get two files containing Lua arrays back.&lt;&#x2F;p&gt;
+&lt;p&gt;With those two files, we can write a Lua script that reads them, checks
+the query against the lists, and manipulates the result accordingly.
+Here&#x27;s the script:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;adservers&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;=&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb454;&quot;&gt;newDS&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;()
+permitted&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;=&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb454;&quot;&gt;newDS&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;()
+
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;function &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb454;&quot;&gt;preresolve&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;dq&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;)
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;if &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;permitted&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;:&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb454;&quot;&gt;check&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(dq&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;qname) &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;or &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;not &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;adservers&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;:&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb454;&quot;&gt;check&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(dq&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;qname))  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;then
+    return &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;false
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;end
+
+  if&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(dq&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;qtype &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;== &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;pdns&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;A) &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;then
+    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;dq&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;:&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb454;&quot;&gt;addAnswer&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(dq&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;qtype&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;127.0.0.1&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;)
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;elseif&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(dq&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;qtype &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;== &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;pdns&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;AAAA) &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;then
+    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;dq&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;:&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb454;&quot;&gt;addAnswer&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(dq&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;qtype&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;, &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;::1&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;)
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;end
+  return &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;true
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;end
+
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;adservers&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;:&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb454;&quot;&gt;add&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f07178;&quot;&gt;dofile&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;&#x2F;srv&#x2F;config&#x2F;blocklist.lua&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;))
+permitted&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29668;&quot;&gt;:&lt;&#x2F;span&gt;&lt;span style=&quot;color:#ffb454;&quot;&gt;add&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f07178;&quot;&gt;dofile&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;(&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;&#x2F;srv&#x2F;config&#x2F;permitted.lua&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;))
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We&#x27;ll add that script and the two generated lists to the
+&lt;code&gt;recursor-config&lt;&#x2F;code&gt; ConfigMap, and we&#x27;ll append&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;lua-dns-script=&#x2F;srv&#x2F;config&#x2F;adblock.lua
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;to our &lt;code&gt;recursor.conf&lt;&#x2F;code&gt;. Once that&#x27;s done, we&#x27;ll restart the recursor
+with &lt;code&gt;kubectl rollout restart deployment&#x2F;recursor&lt;&#x2F;code&gt;.&lt;&#x2F;p&gt;
+&lt;p&gt;Let&#x27;s run the same &lt;code&gt;dig&lt;&#x2F;code&gt; command we used earlier to check that this
+works:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; dig Adsatt.go.starwave.com @192.168.1.232 +short
+127.0.0.1
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Perfect! By returning &lt;code&gt;127.0.0.1&lt;&#x2F;code&gt;, or &lt;code&gt;localhost&lt;&#x2F;code&gt;, we block the
+offending site. Our browser (or other application) will issue a
+request to the machine it&#x27;s running on, and should get a very
+fast negative response back.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;automating&quot;&gt;Automating&lt;&#x2F;h2&gt;
+&lt;p&gt;There&#x27;s one problem with what we have currently: it&#x27;ll get out of date
+as new adware and malware sites appear. So let&#x27;s ensure that we get a
+daily update of our lists.&lt;&#x2F;p&gt;
+&lt;p&gt;First, we&#x27;re going to run the blocklister I introduced above as an
+&lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;concepts&#x2F;workloads&#x2F;pods&#x2F;init-containers&#x2F;&quot;&gt;InitContainer&lt;&#x2F;a&gt;.
+This is a container that runs before the normal
+container, and can be used to set up the pod. In our case, it&#x27;ll
+create the block lists. We&#x27;ll use an &lt;code&gt;EmptyDir&lt;&#x2F;code&gt; volume to share the
+configuration between the InitContainer and the recursor.&lt;&#x2F;p&gt;
+&lt;p&gt;Here&#x27;s the InitContainer spec to add to our Deployment:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;initContainers&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;blocklister
+        image&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;docker.io&#x2F;thommay&#x2F;blocklister:latest
+        command&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;&#x2F;usr&#x2F;local&#x2F;bin&#x2F;blocklister&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;,&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;&#x2F;srv&#x2F;blocklister&#x2F;config.toml&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;]
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;volumeMounts&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;blocklister-config-volume
+          mountPath&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;&#x2F;srv&#x2F;blocklister
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;data
+          mountPath&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&#x2F;srv&#x2F;data
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Now, every time our deployment starts up, it&#x27;ll generate the configs we
+need. We&#x27;ll also need to fix &lt;code&gt;adblock.lua&lt;&#x2F;code&gt; to point at the freshly generated lists.
+For our final trick, we&#x27;ll use a CronJob to restart the Deployment
+at 3am every day.&lt;&#x2F;p&gt;
+&lt;p&gt;For this to work, we have to create a ServiceAccount, give it
+permissions to restart the Deployment, and then create a CronJob and get
+it to use the ServiceAccount. The complete config is in the &lt;a href=&quot;https:&#x2F;&#x2F;gist.github.com&#x2F;thommay&#x2F;80826aae8cc53187c46d7643f364172a#file-recursor-restart-yaml&quot;&gt;Gist&lt;&#x2F;a&gt;, but
+let&#x27;s look at the CronJob:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;apiVersion&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;batch&#x2F;v1beta1
+kind&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;CronJob
+metadata&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;recursor-restart
+  namespace&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;default
+spec&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;concurrencyPolicy&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;Forbid
+  schedule&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;#39;0 3 * * *&amp;#39; &lt;&#x2F;span&gt;&lt;span style=&quot;font-style:italic;color:#5c6773;&quot;&gt;# 3am daily
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;jobTemplate&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;spec&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;backoffLimit&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;2
+      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;activeDeadlineSeconds&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;600
+      &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;template&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+        &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;spec&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;serviceAccountName&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;recursor-restart
+          restartPolicy&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;Never
+          containers&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+          &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;- &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;kubectl
+            image&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;bitnami&#x2F;kubectl
+            command&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;[&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;kubectl&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;,&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;rollout&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;,&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;restart&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;,&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;&amp;quot;deployment&#x2F;recursor&amp;quot;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;]
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We ensure we&#x27;re using the &lt;code&gt;serviceAccountName&lt;&#x2F;code&gt; we&#x27;ve already configured,
+run the Job on a schedule, and then use a containerised copy of
+&lt;code&gt;kubectl&lt;&#x2F;code&gt; to perform a rolling restart of the deployment.&lt;&#x2F;p&gt;
+&lt;p&gt;And that&#x27;s it - we&#x27;ve got a fast local recursor that&#x27;s automatically
+updated at 3am nightly with the latest blocklists.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;recap&quot;&gt;Recap&lt;&#x2F;h2&gt;
+&lt;p&gt;We&#x27;ve created a containerised version of PowerDNS Recursor, and run it
+in Kubernetes. We&#x27;ve then built a tool to generate blocklists in the
+format we need, and caused it to be run every night.
+We&#x27;ve now got a sinkhole server on our local network, running a tech
+stack that we fully control.&lt;&#x2F;p&gt;
+</content>
+	</entry>
+	<entry xml:lang="en">
+		<title>Running the Unifi Controller in Kubernetes</title>
+		<published>2019-12-08T00:00:00+00:00</published>
+		<updated>2019-12-08T00:00:00+00:00</updated>
+		<link href="https://blog.may.yt/2019/12/unifi-controller-in-k8s/" type="text/html"/>
+		<id>https://blog.may.yt/2019/12/unifi-controller-in-k8s/</id>
+		<content type="html">&lt;p&gt;Over the past few years, I&#x27;ve built up a small collection of
+&lt;a href=&quot;https:&#x2F;&#x2F;unifi-network.ui.com&#x2F;&quot;&gt;Ubiquiti Unifi&lt;&#x2F;a&gt; kit. With some small
+exceptions - mostly getting BT&#x27;s multicast HD content working -
+pulling this all together has been a smooth process. But one part has
+always left me rather dissatisfied: running the management Controller. &lt;&#x2F;p&gt;
+&lt;span id=&quot;continue-reading&quot;&gt;&lt;&#x2F;span&gt;&lt;h3 id=&quot;the-unifi-controller&quot;&gt;The Unifi Controller&lt;&#x2F;h3&gt;
+&lt;p&gt;There are fundamentally two ways to run the Controller. You can buy a
+Cloud Key and treat it as a managed device, or you can install the
+software (there are &lt;a href=&quot;https:&#x2F;&#x2F;www.ui.com&#x2F;download&#x2F;unifi&quot;&gt;Debian packages
+available&lt;&#x2F;a&gt;, amongst others) and run
+it yourself. Since I have a home server, I&#x27;ve always run this myself by
+creating a virtual machine for it and installing the package.&lt;&#x2F;p&gt;
+&lt;p&gt;The Controller itself is a Java app with an embedded MongoDB server for
+data retention. One of the reasons for my dissatisfaction has been this
+embedded MongoDB - it seemed like every upgrade of the package would
+cause the database to get wedged in new and exciting ways, requiring
+restore from backup or frantic searching to figure out the commands to
+recover the database.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;the-plan&quot;&gt;The Plan&lt;&#x2F;h2&gt;
+&lt;p&gt;I already had a minimally running &lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&quot;&gt;Kubernetes&lt;&#x2F;a&gt;
+cluster at home, so the plan is to get from there to having the Unifi
+Controller connected to a separate MongoDB instance, all the required
+ports routable, and all my Unifi kit reporting in correctly.&lt;&#x2F;p&gt;
+&lt;h3 id=&quot;the-starting-point&quot;&gt;The starting point&lt;&#x2F;h3&gt;
+&lt;p&gt;A two node Kubernetes cluster, built with &lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;reference&#x2F;setup-tools&#x2F;kubeadm&#x2F;kubeadm&#x2F;&quot;&gt;Kubeadm&lt;&#x2F;a&gt; and running 1.16.1 currently.  Container networking provided by &lt;a href=&quot;https:&#x2F;&#x2F;www.weave.works&#x2F;docs&#x2F;net&#x2F;latest&#x2F;kubernetes&#x2F;&quot;&gt;Weave Net&lt;&#x2F;a&gt;, and completely default. The &lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;setup&#x2F;production-environment&#x2F;tools&#x2F;kubeadm&#x2F;create-cluster-kubeadm&#x2F;#control-plane-node-isolation&quot;&gt;control-plane node is untainted&lt;&#x2F;a&gt;, so it can run workloads. &lt;&#x2F;p&gt;
+&lt;p&gt;To minimise the amount of raw YAML I needed to write, I chose to
+use &lt;a href=&quot;https:&#x2F;&#x2F;helm.sh&quot;&gt;Helm 3&lt;&#x2F;a&gt; to manage individual workloads. Once you
+have &lt;a href=&quot;https:&#x2F;&#x2F;helm.sh&#x2F;docs&#x2F;intro&#x2F;install&#x2F;&quot;&gt;Helm installed&lt;&#x2F;a&gt;, add the
+stable repository, which is where we&#x27;ll find the charts we need:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt;  helm repo add stable https:&#x2F;&#x2F;kubernetes-charts.storage.googleapis.com&#x2F;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h2 id=&quot;persistent-data&quot;&gt;Persistent Data&lt;&#x2F;h2&gt;
+&lt;p&gt;Both MongoDB and the Unifi Controller expect to persist data to disk,
+and we&#x27;ll want that data to last for longer than the lifetime of an
+individual pod - so we don&#x27;t lose all our data when we upgrade the
+Controller.&lt;br &#x2F;&gt;
+Kubernetes uses &lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;concepts&#x2F;storage&#x2F;persistent-volumes&#x2F;#persistentvolumeclaims&quot;&gt;PersistentVolumeClaims&lt;&#x2F;a&gt; (PVCs) to associate storage with a service. A claim is bound to a PersistentVolume, and a pod then mounts the volume. Storage is defined by StorageClasses, and by default there are none available. &lt;&#x2F;p&gt;
+&lt;p&gt;The
+&lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;kubernetes-incubator&#x2F;external-storage&quot;&gt;external-storage&lt;&#x2F;a&gt; 
+project provides some implementations of StorageClasses for common
+file servers. I already have an NFS server running, so I&#x27;ll use the
+&lt;a href=&quot;https:&#x2F;&#x2F;github.com&#x2F;kubernetes-incubator&#x2F;external-storage&#x2F;tree&#x2F;master&#x2F;nfs-client&quot;&gt;nfs-client&lt;&#x2F;a&gt; StorageClass. There&#x27;s a Helm chart, so we simply need to provide the details of our NFS server:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; helm install  nfs-pvc stable&#x2F;nfs-client-provisioner --set nfs.server=192.168.1.91 --set nfs.path=&#x2F;data&#x2F;pvc
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;You&#x27;ll also want to have &lt;code&gt;libnfs-utils&lt;&#x2F;code&gt; installed on each node of your
+cluster.&lt;&#x2F;p&gt;
+&lt;p&gt;Once done, you should see a new StorageClass:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; kubectl get storageclass
+NAME         PROVISIONER                                    AGE
+nfs-client   cluster.local&#x2F;nfs-pvc-nfs-client-provisioner   4d13h
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We&#x27;ll want to set that StorageClass as the &lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;tasks&#x2F;administer-cluster&#x2F;change-default-storage-class&#x2F;&quot;&gt;default&lt;&#x2F;a&gt;, so we don&#x27;t have to
+specify it explicitly each time.&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; kubectl patch storageclass nfs-client -p &amp;#39;{&amp;quot;metadata&amp;quot;: {&amp;quot;annotations&amp;quot;:{&amp;quot;storageclass.kubernetes.io&#x2F;is-default-class&amp;quot;:&amp;quot;true&amp;quot;}}}&amp;#39;
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;&lt;h2 id=&quot;mongodb&quot;&gt;MongoDB&lt;&#x2F;h2&gt;
+&lt;p&gt;Now we have some storage available, let&#x27;s get MongoDB running. Helm makes it easy to inspect the
+README associated with a chart, so let&#x27;s start by doing so: &lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; helm show readme stable&#x2F;mongodb
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We&#x27;ll want to create a database for the Controller, and a username and
+password. I also chose to turn on Prometheus metrics, leaving me with a
+&lt;code&gt;unifi-mongodb.yaml&lt;&#x2F;code&gt; like this:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;mongodbUsername&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;unifi
+mongodbPassword&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;xxxxx
+mongodbDatabase&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;unifi
+metrics&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;enabled&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;true
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We&#x27;ll install this chart with Helm:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; helm install unifi-mongodb stable&#x2F;mongodb -f unifi-mongodb.yaml
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We can see that a service, called &lt;code&gt;unifi-mongodb&lt;&#x2F;code&gt;, and a pod have been
+created:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; kubectl get svc,po -l app=mongodb
+NAME                    TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)     AGE
+service&#x2F;unifi-mongodb   ClusterIP   10.96.155.160   &amp;lt;none&amp;gt;        27017&#x2F;TCP   4d14h
+
+NAME                                 READY   STATUS    RESTARTS   AGE
+pod&#x2F;unifi-mongodb-5bcbcdbdfc-whccb   1&#x2F;1     Running   0          4d14h
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Once the pod is Running, we&#x27;ll want to use the MongoDB client to connect to
+the database, so we can perform some additional config. The instructions
+to do so are printed by Helm at the end of install, but I&#x27;ll recap them
+here. First, get the MongoDB root password; it&#x27;s stored as a
+&lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;concepts&#x2F;configuration&#x2F;secret&#x2F;&quot;&gt;Secret&lt;&#x2F;a&gt;:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; export MONGODB_ROOT_PASSWORD=$(kubectl get secret --namespace default unifi-mongodb -o jsonpath=&amp;quot;{.data.mongodb-root-password}&amp;quot; | base64 --decode)
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Now you can run a &lt;code&gt;mongodb-client&lt;&#x2F;code&gt; container and connect to the DB.
+Kubernetes automatically creates a host name for each service in the
+cluster, so we can use &lt;code&gt;unifi-mongodb&lt;&#x2F;code&gt; to connect:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; kubectl run --namespace default mongodb-client --rm --tty -i --restart=&amp;#39;Never&amp;#39; --image bitnami&#x2F;mongodb --command -- mongo admin --host unifi-mongodb   --authenticationDatabase admin -u root -p $MONGODB_ROOT_PASSWORD
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We need to grant additional privileges to the &lt;code&gt;unifi&lt;&#x2F;code&gt; user, to match
+what the Controller expects. We&#x27;re going to grant &lt;code&gt;dbOwner&lt;&#x2F;code&gt; on &lt;code&gt;unifi&lt;&#x2F;code&gt;
+and &lt;code&gt;unifi_stat&lt;&#x2F;code&gt;, meaning that the Controller can drop the database and
+recreate it, which it needs to do when restoring from backup. We also
+grant &lt;code&gt;clusterMonitor&lt;&#x2F;code&gt; on the &lt;code&gt;admin&lt;&#x2F;code&gt; database, allowing the Controller
+to run the &lt;code&gt;serverStatus()&lt;&#x2F;code&gt; command.&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;# first, make sure we&amp;#39;re using the unifi database
+&amp;gt; use unifi
+# next, grant the correct permissions
+&amp;gt; db.grantRolesToUser(&amp;quot;unifi&amp;quot;, [ 
+  { db: &amp;quot;unifi&amp;quot;, role: &amp;quot;dbOwner&amp;quot; },
+  { db: &amp;quot;unifi_stat&amp;quot;, role: &amp;quot;dbOwner&amp;quot; },
+  { db: &amp;quot;admin&amp;quot;, role: &amp;quot;clusterMonitor&amp;quot; }
+  ]);
+# now verify
+&amp;gt; &amp;gt; db.getUser(&amp;quot;unifi&amp;quot;);
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;That&#x27;s Mongo fully configured for our use.&lt;&#x2F;p&gt;
+&lt;h2 id=&quot;the-unifi-controller-1&quot;&gt;The Unifi Controller&lt;&#x2F;h2&gt;
+&lt;p&gt;Let&#x27;s minimally get the Controller running. We want to tell it to use
+our freshly baked MongoDB instance, but that&#x27;s it. Replace XXX in the
+URLs with the password you set for the &lt;code&gt;unifi&lt;&#x2F;code&gt; user.&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;mongodb&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;enabled&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;true
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;dbUri&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;mongodb:&#x2F;&#x2F;unifi:XXX@unifi-mongodb&#x2F;unifi?authSource=unifi
+  statDbUri&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;mongodb:&#x2F;&#x2F;unifi:XXX@unifi-mongodb&#x2F;unifi_stat?authSource=unifi
+  databaseName&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;unifi
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;As a quick aside, we must specify &lt;code&gt;authSource&lt;&#x2F;code&gt;, because user accounts in
+MongoDB are tied to a database, but can then be granted access to other
+databases. No, me neither.&lt;&#x2F;p&gt;
+&lt;p&gt;As usual, we&#x27;ll helm install this:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;helm install unifi stable&#x2F;unifi -f unifi.yaml
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;and after a moment or two, we&#x27;ll have a running unifi pod. We&#x27;ll also
+have some services:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; kubectl get svc -l app.kubernetes.io&#x2F;name=unifi
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;You&#x27;ll notice that the TYPE field is a mix of
+&lt;a href=&quot;https:&#x2F;&#x2F;kubernetes.io&#x2F;docs&#x2F;concepts&#x2F;services-networking&#x2F;service&#x2F;#nodeport&quot;&gt;NodePort&lt;&#x2F;a&gt; and ClusterIP (the default). A ClusterIP sets up an IP in the cluster&#x27;s &lt;code&gt;serviceSubnet&lt;&#x2F;code&gt;, meaning it won&#x27;t be routable outside the cluster. A NodePort exposes the configured port on each node of the cluster, and then forwards that port to a ClusterIP.&lt;&#x2F;p&gt;
+&lt;p&gt;To access the web UI, we&#x27;ll need to port forward 8443 to the pod running our controller:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;kubectl --namespace default port-forward --address 0.0.0.0 unifi-795dc84449-dd66q  8443:8443
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;This works, but is pretty annoying; we&#x27;ll need to have the
+port-forward command running all the time. In cloud environments,
+Kubernetes works with the cloud&#x27;s native load balancers to expose
+services. At home, we need to do something slightly different.&lt;&#x2F;p&gt;
+&lt;h3 id=&quot;metallb&quot;&gt;MetalLB&lt;&#x2F;h3&gt;
+&lt;p&gt;&lt;a href=&quot;https:&#x2F;&#x2F;metallb.universe.tf&#x2F;&quot;&gt;MetalLB&lt;&#x2F;a&gt; provides Kubernetes LoadBalancers on bare metal clusters. For the moment, we&#x27;ll do the simplest possible thing, and use it in &lt;a href=&quot;https:&#x2F;&#x2F;metallb.universe.tf&#x2F;concepts&#x2F;layer2&#x2F;&quot;&gt;L2 mode&lt;&#x2F;a&gt;.
+First, we&#x27;ll get it installed:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;helm install metallb stable&#x2F;metallb
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Then, we&#x27;ll configure L2 mode:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;apiVersion&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;v1
+kind&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;ConfigMap
+metadata&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;namespace&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;metallb-system
+  name&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;config
+data&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+  &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;config&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;|
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#c2d94c;&quot;&gt;    address-pools:
+    - name: default
+      protocol: layer2
+      addresses:
+      - 192.168.1.210-192.168.1.250
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;We&#x27;re provisioning a pool of 40 IPs here to use for load balancers.
+Now, apply that:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; kubectl apply -f metallb.yaml
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Now, we can update our unifi config to use a LoadBalancer. We
+want to run all the services on the same IP, just to make life
+easier.&lt;&#x2F;p&gt;
+&lt;p&gt;By default Kubernetes doesn&#x27;t allow you to put TCP ports
+and UDP ports on the same LoadBalancer (apparently because GCP
+doesn&#x27;t support it), but MetalLB does support it, so we&#x27;ll set
+an annotation to allow it.&lt;&#x2F;p&gt;
+&lt;p&gt;Append this to your existing &lt;code&gt;unifi.yaml&lt;&#x2F;code&gt;:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;guiService&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;&amp;amp;&lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;lbService
+  type&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;LoadBalancer
+  annotations&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;:
+    &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;metallb.universe.tf&#x2F;allow-shared-ip&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;k8s-ext57
+    loadBalancerIP&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;192&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;.&lt;&#x2F;span&gt;&lt;span style=&quot;color:#f29718;&quot;&gt;168.1.231
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;controllerService&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;*&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;lbService
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;stunService&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;*&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;lbService
+&lt;&#x2F;span&gt;&lt;span style=&quot;color:#59c2ff;&quot;&gt;discoveryService&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0cc;&quot;&gt;: &lt;&#x2F;span&gt;&lt;span style=&quot;color:#ff7733;&quot;&gt;*&lt;&#x2F;span&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;lbService
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;You&#x27;ll note we&#x27;re using YAML anchors to save duplicating the
+config.&lt;sup class=&quot;footnote-reference&quot;&gt;&lt;a href=&quot;#unifiedFN&quot;&gt;1&lt;&#x2F;a&gt;&lt;&#x2F;sup&gt;&lt;&#x2F;p&gt;
+&lt;p&gt;Now, we&#x27;ll install the new config:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; helm upgrade unifi stable&#x2F;unifi -f unifi.yaml
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;Using &lt;code&gt;upgrade&lt;&#x2F;code&gt; rather than &lt;code&gt;install&lt;&#x2F;code&gt; means that the configs get
+updated, rather than creating new ones. If all&#x27;s gone to plan, you
+should now see &lt;code&gt;LoadBalancer&lt;&#x2F;code&gt;s as the service types:&lt;&#x2F;p&gt;
+&lt;pre style=&quot;background-color:#0f1419;&quot;&gt;
+&lt;code&gt;&lt;span style=&quot;color:#bfbab0;&quot;&gt;&amp;gt; kubectl get svc -l app.kubernetes.io&#x2F;name=unifi
+NAME               TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)           AGE
+unifi-controller   LoadBalancer   10.96.34.54     192.168.1.231   8080:31917&#x2F;TCP    4d20h
+&lt;&#x2F;span&gt;&lt;&#x2F;code&gt;&lt;&#x2F;pre&gt;
+&lt;p&gt;And you&#x27;ll be able to access your controller at
+&lt;a href=&quot;https:&#x2F;&#x2F;192.168.1.231:8443&quot;&gt;https:&#x2F;&#x2F;192.168.1.231:8443&lt;&#x2F;a&gt;!&lt;&#x2F;p&gt;
+&lt;p&gt;Thanks for sticking with me, I know this got quite long. But hopefully
+the end result was worth it.&lt;&#x2F;p&gt;
+&lt;div class=&quot;footnote-definition&quot; id=&quot;unifiedFN&quot;&gt;&lt;sup class=&quot;footnote-definition-label&quot;&gt;1&lt;&#x2F;sup&gt;
+&lt;p&gt;In theory, the &lt;code&gt;unifiedService&lt;&#x2F;code&gt; should do this for us, but
+I can&#x27;t get it to work.&lt;&#x2F;p&gt;
+&lt;&#x2F;div&gt;
+</content>
+	</entry>
+</feed>

@@ -1,0 +1,2 @@
+User-agent: *
+Sitemap: https://blog.may.yt/sitemap.xml

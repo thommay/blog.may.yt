@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang=en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="For some time I&#x27;ve been meaning to set up a
+Pi-hole to drop advertising and
+malware sites by using DNS. 
+">
+    <meta name="author" content="Thom May">
+
+    
+        <link rel="canonical" href="https://blog.may.yt/2020/06/pdns-sinkhole/" />
+    
+
+    <link rel="alternate" type="application/atom+xml" title="Atom feed for blog.may.yt" href="https://blog.may.yt/atom.xml" />
+
+    <link href="/styles.css" rel="stylesheet">
+
+    <title>Sinkholing with PowerDNS Recursor | Thom&#x27;s Blog</title>
+</head>
+<body>
+  <div class="container content">
+    <header class="masthead">
+      <div style="position:relative">
+        <h2 class="masthead-title">
+          <a href="https://blog.may.yt" title="Home">Thom's Blog</a>
+        </h2>
+        <aside id="all-posts-link"><a href="https://blog.may.yt" title="All Posts">« All Posts</a></aside>
+      </div>
+    </header>
+
+    <div>
+      
+<aside id="toc-aside">
+    <h2>Table of Contents</h2>
+    <ol>
+        <li>
+            <a href="#running-powerdns-recursor">Running PowerDNS Recursor</a>
+            
+        </li><li>
+            <a href="#sinkholing">Sinkholing</a>
+            
+        </li><li>
+            <a href="#automating">Automating</a>
+            
+        </li><li>
+            <a href="#recap">Recap</a>
+            
+        </li>
+    </ol>
+</aside>
+
+      <main>
+    <h1>Sinkholing with PowerDNS Recursor</h1>
+    <time datetime="2020-06-04" class="post-date">
+        Jun 04, 2020
+        
+    </time>
+
+    <p>For some time I've been meaning to set up a
+<a href="https://github.com/pi-hole/pi-hole">Pi-hole</a> to drop advertising and
+malware sites by using DNS. </p>
+<span id="continue-reading"></span>
+<p>One of the things that has stopped me has
+been the size of the tech stack that Pi-hole uses - I don't really want
+to pick up a webserver, control panel and dnsmasq just to do some fancy
+DNS recursion.</p>
+<p>I also have a Kubernetes cluster, so I'm gonna work my way through
+running <a href="https://doc.powerdns.com/recursor/index.html">PowerDNS
+Recursor</a> in a container
+in Kubernetes, and then setting it to sinkhole sites.</p>
+<h2 id="running-powerdns-recursor">Running PowerDNS Recursor</h2>
+<p>This is pretty straightforward. I've created a <a href="https://github.com/thommay/docker-pdns-recursor">minimal
+Dockerfile</a> intended
+for use with Kubernetes, and put it <a href="https://hub.docker.com/r/thommay/pdns_recursor">on
+DockerHub</a>. I used
+<a href="https://buildah.io/">buildah</a> to build the image, since all my nodes
+have cri-o on rather than Docker.</p>
+<p>Next, I'll run my <code>pdns_recursor</code> container in Kubernetes. We'll use a
+<a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Deployment</a> to ensure the container is running as a pod, and then a
+<a href="https://kubernetes.io/docs/concepts/services-networking/service">Service</a> with a <a href="https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer">LoadBalancer</a> to expose port 53 on both UDP and TCP. The
+config for the recursor will live in a <a href="https://kubernetes.io/docs/concepts/configuration/configmap/">ConfigMap</a> and get mounted into
+the pod as a <a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/#add-configmap-data-to-a-volume">Volume</a>.
+I've put all the kubernetes configs I'm using into <a href="https://gist.github.com/thommay/80826aae8cc53187c46d7643f364172a">a Gist</a>, and will
+only excerpt the interesting bits below.</p>
+<p>So, here's the pod spec for the deployment:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">    </span><span style="color:#59c2ff;">spec</span><span style="color:#bfbab0cc;">:
+      </span><span style="color:#59c2ff;">volumes</span><span style="color:#bfbab0cc;">:
+      </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">recursor-config-volume
+        configMap</span><span style="color:#bfbab0cc;">:
+          </span><span style="color:#59c2ff;">name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">recursor-config
+      containers</span><span style="color:#bfbab0cc;">:
+      </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">image</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">docker.io/thommay/pdns_recursor:4.3.1-1
+        imagePullPolicy</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">IfNotPresent
+        name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">recursor
+        ports</span><span style="color:#bfbab0cc;">:
+          </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">containerPort</span><span style="color:#bfbab0cc;">: </span><span style="color:#f29718;">53
+            </span><span style="color:#59c2ff;">protocol</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">UDP
+            name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">udp-dns
+          </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">containerPort</span><span style="color:#bfbab0cc;">: </span><span style="color:#f29718;">53
+            </span><span style="color:#59c2ff;">protocol</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">TCP
+            name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">tcp-dns
+          </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">containerPort</span><span style="color:#bfbab0cc;">: </span><span style="color:#f29718;">8082
+            </span><span style="color:#59c2ff;">name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">metrics
+        volumeMounts</span><span style="color:#bfbab0cc;">:
+        </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">recursor-config-volume
+          mountPath</span><span style="color:#bfbab0cc;">: </span><span style="color:#c2d94c;">/srv/config
+</span></code></pre>
+<p>Into the <code>recursor-config</code> <a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/#create-configmaps-from-files">ConfigMap</a> goes a very trivial <code>recursor.conf</code>:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">local-address=0.0.0.0, ::
+disable-syslog=yes         # so that our logs show up in the pod&#39;s logs
+webserver=yes              # for prometheus metrics scraping
+webserver-address=0.0.0.0 
+</span></code></pre>
+<p>We'll finish off with a pair of <a href="https://gist.github.com/thommay/80826aae8cc53187c46d7643f364172a#file-recursor-svc-yaml">LoadBalancer
+services</a>, for TCP and UDP.</p>
+<p>With these running, we can use <code>dig</code> to test our recursor:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; dig Adsatt.go.starwave.com @192.168.1.232 +short
+adimages.go.com.edgesuite.net.
+a1412.g.akamai.net.
+213.123.244.147
+213.123.244.138
+</span></code></pre>
+<p>Great, we have a working DNS resolver.</p>
+<h2 id="sinkholing">Sinkholing</h2>
+<p>Lots of kind people maintain blocklists of unsavoury sites. A good list
+of them is maintained on <a href="https://firebog.net/">the Firebog</a>, along with
+some basic validation. You'll probably also want to pick up 
+<a href="https://github.com/anudeepND/whitelist">anudeep's permitted list</a>.</p>
+<p>PowerDNS allows us to <a href="https://doc.powerdns.com/recursor/lua-scripting/index.html">script the recursor</a> with Lua,
+and we'll use this to import the block lists and check the queries
+against them.</p>
+<p>I wrote a very trivial Rust binary to do this for me: <a href="https://github.com/thommay/blocklister">here's the
+source</a>. You give it a list of
+blocklists, a permit list and you get two files containing Lua arrays back.</p>
+<p>With those two files, we can write a Lua script that reads them, checks
+the query against the lists, and manipulates the result accordingly.
+Here's the script:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">adservers</span><span style="color:#f29668;">=</span><span style="color:#ffb454;">newDS</span><span style="color:#bfbab0;">()
+permitted</span><span style="color:#f29668;">=</span><span style="color:#ffb454;">newDS</span><span style="color:#bfbab0;">()
+
+</span><span style="color:#ff7733;">function </span><span style="color:#ffb454;">preresolve</span><span style="color:#bfbab0;">(</span><span style="color:#f29718;">dq</span><span style="color:#bfbab0;">)
+  </span><span style="color:#ff7733;">if </span><span style="color:#bfbab0;">permitted</span><span style="color:#f29668;">:</span><span style="color:#ffb454;">check</span><span style="color:#bfbab0;">(dq</span><span style="color:#f29668;">.</span><span style="color:#bfbab0;">qname) </span><span style="color:#f29668;">or </span><span style="color:#bfbab0;">(</span><span style="color:#f29668;">not </span><span style="color:#bfbab0;">adservers</span><span style="color:#f29668;">:</span><span style="color:#ffb454;">check</span><span style="color:#bfbab0;">(dq</span><span style="color:#f29668;">.</span><span style="color:#bfbab0;">qname))  </span><span style="color:#ff7733;">then
+    return </span><span style="color:#f29718;">false
+  </span><span style="color:#ff7733;">end
+
+  if</span><span style="color:#bfbab0;">(dq</span><span style="color:#f29668;">.</span><span style="color:#bfbab0;">qtype </span><span style="color:#f29668;">== </span><span style="color:#bfbab0;">pdns</span><span style="color:#f29668;">.</span><span style="color:#bfbab0;">A) </span><span style="color:#ff7733;">then
+    </span><span style="color:#bfbab0;">dq</span><span style="color:#f29668;">:</span><span style="color:#ffb454;">addAnswer</span><span style="color:#bfbab0;">(dq</span><span style="color:#f29668;">.</span><span style="color:#bfbab0;">qtype</span><span style="color:#bfbab0cc;">, </span><span style="color:#c2d94c;">&quot;127.0.0.1&quot;</span><span style="color:#bfbab0;">)
+  </span><span style="color:#ff7733;">elseif</span><span style="color:#bfbab0;">(dq</span><span style="color:#f29668;">.</span><span style="color:#bfbab0;">qtype </span><span style="color:#f29668;">== </span><span style="color:#bfbab0;">pdns</span><span style="color:#f29668;">.</span><span style="color:#bfbab0;">AAAA) </span><span style="color:#ff7733;">then
+    </span><span style="color:#bfbab0;">dq</span><span style="color:#f29668;">:</span><span style="color:#ffb454;">addAnswer</span><span style="color:#bfbab0;">(dq</span><span style="color:#f29668;">.</span><span style="color:#bfbab0;">qtype</span><span style="color:#bfbab0cc;">, </span><span style="color:#c2d94c;">&quot;::1&quot;</span><span style="color:#bfbab0;">)
+  </span><span style="color:#ff7733;">end
+  return </span><span style="color:#f29718;">true
+</span><span style="color:#ff7733;">end
+
+</span><span style="color:#bfbab0;">adservers</span><span style="color:#f29668;">:</span><span style="color:#ffb454;">add</span><span style="color:#bfbab0;">(</span><span style="color:#f07178;">dofile</span><span style="color:#bfbab0;">(</span><span style="color:#c2d94c;">&quot;/srv/config/blocklist.lua&quot;</span><span style="color:#bfbab0;">))
+permitted</span><span style="color:#f29668;">:</span><span style="color:#ffb454;">add</span><span style="color:#bfbab0;">(</span><span style="color:#f07178;">dofile</span><span style="color:#bfbab0;">(</span><span style="color:#c2d94c;">&quot;/srv/config/permitted.lua&quot;</span><span style="color:#bfbab0;">))
+</span></code></pre>
+<p>We'll add that script and the two generated lists to the
+<code>recursor-config</code> ConfigMap, and we'll append</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">lua-dns-script=/srv/config/adblock.lua
+</span></code></pre>
+<p>to our <code>recursor.conf</code>. Once that's done, we'll restart the recursor
+with <code>kubectl rollout restart deployment/recursor</code>.</p>
+<p>Let's run the same <code>dig</code> command we used earlier to check that this
+works:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">&gt; dig Adsatt.go.starwave.com @192.168.1.232 +short
+127.0.0.1
+</span></code></pre>
+<p>Perfect! By returning <code>127.0.0.1</code>, or <code>localhost</code>, we block the
+offending site. Our browser (or other application) will issue a
+request to the machine it's running on, and should get a very
+fast negative response back.</p>
+<h2 id="automating">Automating</h2>
+<p>There's one problem with what we have currently: it'll get out of date
+as new adware and malware sites appear. So let's ensure that we get a
+daily update of our lists.</p>
+<p>First, we're going to run the blocklister I introduced above as an
+<a href="https://kubernetes.io/docs/concepts/workloads/pods/init-containers/">InitContainer</a>.
+This is a container that runs before the normal
+container, and can be used to set up the pod. In our case, it'll
+create the block lists. We'll use an <code>EmptyDir</code> volume to share the
+configuration between the InitContainer and the recursor.</p>
+<p>Here's the InitContainer spec to add to our Deployment:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#bfbab0;">      </span><span style="color:#59c2ff;">initContainers</span><span style="color:#bfbab0cc;">:
+      </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">blocklister
+        image</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">docker.io/thommay/blocklister:latest
+        command</span><span style="color:#bfbab0cc;">: </span><span style="color:#bfbab0;">[</span><span style="color:#c2d94c;">&quot;/usr/local/bin/blocklister&quot;</span><span style="color:#bfbab0cc;">,</span><span style="color:#c2d94c;">&quot;/srv/blocklister/config.toml&quot;</span><span style="color:#bfbab0;">]
+        </span><span style="color:#59c2ff;">volumeMounts</span><span style="color:#bfbab0cc;">:
+        </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">blocklister-config-volume
+          mountPath</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">/srv/blocklister
+        </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">data
+          mountPath</span><span style="color:#bfbab0cc;">: </span><span style="color:#c2d94c;">/srv/data
+</span></code></pre>
+<p>Now, every time our deployment starts up, it'll generate the configs we
+need. We'll also need to fix <code>adblock.lua</code> to point at the freshly generated lists.
+For our final trick, we'll use a CronJob to restart the Deployment
+at 3am every day.</p>
+<p>For this to work, we have to create a ServiceAccount, give it
+permissions to restart the Deployment, and then create a CronJob and get
+it to use the ServiceAccount. The complete config is in the <a href="https://gist.github.com/thommay/80826aae8cc53187c46d7643f364172a#file-recursor-restart-yaml">Gist</a>, but
+let's look at the CronJob:</p>
+<pre style="background-color:#0f1419;">
+<code><span style="color:#59c2ff;">apiVersion</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">batch/v1beta1
+kind</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">CronJob
+metadata</span><span style="color:#bfbab0cc;">:
+  </span><span style="color:#59c2ff;">name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">recursor-restart
+  namespace</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">default
+spec</span><span style="color:#bfbab0cc;">:
+  </span><span style="color:#59c2ff;">concurrencyPolicy</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">Forbid
+  schedule</span><span style="color:#bfbab0cc;">: </span><span style="color:#c2d94c;">&#39;0 3 * * *&#39; </span><span style="font-style:italic;color:#5c6773;"># 3am daily
+  </span><span style="color:#59c2ff;">jobTemplate</span><span style="color:#bfbab0cc;">:
+    </span><span style="color:#59c2ff;">spec</span><span style="color:#bfbab0cc;">:
+      </span><span style="color:#59c2ff;">backoffLimit</span><span style="color:#bfbab0cc;">: </span><span style="color:#f29718;">2
+      </span><span style="color:#59c2ff;">activeDeadlineSeconds</span><span style="color:#bfbab0cc;">: </span><span style="color:#f29718;">600
+      </span><span style="color:#59c2ff;">template</span><span style="color:#bfbab0cc;">:
+        </span><span style="color:#59c2ff;">spec</span><span style="color:#bfbab0cc;">:
+          </span><span style="color:#59c2ff;">serviceAccountName</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">recursor-restart
+          restartPolicy</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">Never
+          containers</span><span style="color:#bfbab0cc;">:
+          </span><span style="color:#bfbab0;">- </span><span style="color:#59c2ff;">name</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">kubectl
+            image</span><span style="color:#bfbab0cc;">: </span><span style="color:#59c2ff;">bitnami/kubectl
+            command</span><span style="color:#bfbab0cc;">: </span><span style="color:#bfbab0;">[</span><span style="color:#c2d94c;">&quot;kubectl&quot;</span><span style="color:#bfbab0cc;">,</span><span style="color:#c2d94c;">&quot;rollout&quot;</span><span style="color:#bfbab0cc;">,</span><span style="color:#c2d94c;">&quot;restart&quot;</span><span style="color:#bfbab0cc;">,</span><span style="color:#c2d94c;">&quot;deployment/recursor&quot;</span><span style="color:#bfbab0;">]
+</span></code></pre>
+<p>We ensure we're using the <code>serviceAccountName</code> we've already configured,
+run the Job on a schedule, and then use a containerised copy of
+<code>kubectl</code> to perform a rolling restart of the deployment.</p>
+<p>And that's it - we've got a fast local recursor that's automatically
+updated at 3am nightly with the latest blocklists.</p>
+<h2 id="recap">Recap</h2>
+<p>We've created a containerised version of PowerDNS Recursor, and run it
+in Kubernetes. We've then built a tool to generate blocklists in the
+format we need, and caused it to be run every night.
+We've now got a sinkhole server on our local network, running a tech
+stack that we fully control.</p>
+
+
+    <hr>
+    <div class="PageNavigation">
+      
+      
+    </div>
+</main>
+    </div>
+
+    <footer class="footer">
+      <hr>
+      <small>
+        &copy; <time datetime="2020">2020</time>. All rights reserved.
+        <a href="https://blog.may.yt/contact/">Contact</a>
+      </small>
+    </footer>
+  </div>
+
+
+  <!-- Fathom - simple website analytics - https://github.com/usefathom/fathom -->
+  <script>
+    (function(f, a, t, h, o, m){
+      a[h]=a[h]||function(){
+        (a[h].q=a[h].q||[]).push(arguments)
+      };
+      o=f.createElement('script'),
+        m=f.getElementsByTagName('script')[0];
+      o.async=1; o.src=t; o.id='fathom-script';
+      m.parentNode.insertBefore(o,m)
+    })(document, window, '//stats.may.yt/tracker.js', 'fathom');
+    fathom('set', 'siteId', 'AVTMN');
+    fathom('trackPageview');
+  </script>
+  <!-- / Fathom -->
+</body>
+</html>
